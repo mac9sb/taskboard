@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taskboard-config
+  namespace: taskboard
+data:
+  UseInMemoryStore: "false"
+  CosmosDb__DatabaseName: "taskboard"
+  # Emulator uses a self-signed cert — disable SSL verification.
+  # Set to "false" when pointing at a real Azure Cosmos DB account.
+  CosmosDb__DisableSslVerification: "true"
