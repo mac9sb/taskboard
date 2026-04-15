@@ -1,0 +1,20 @@
+checks:
+  # Run only the default built-in checks (no addAllBuiltIn).
+  # Exclude checks that are intentionally not applicable to this local-dev / OrbStack setup.
+  exclude:
+    # OrbStack is a single-node cluster — pod anti-affinity and network policies are N/A
+    - "no-anti-affinity"
+    - "non-isolated-pod"
+    # Local dev images are tagged :latest intentionally; the CD workflow tags by SHA for real deploys
+    - "latest-tag"
+    # Security hardening — appropriate for production, out of scope for this local-dev setup
+    - "no-read-only-root-fs"
+    - "run-as-non-root"
+    - "privilege-escalation-container"
+    - "drop-net-raw-capability"
+    # nginx serves on port 80 inside the cluster (NodePort / port-forward only, not exposed externally)
+    - "privileged-ports"
+    # 2 replicas is intentional for backend/frontend; 1 is intentional for the CosmosDB emulator
+    - "minimum-three-replicas"
+    # CosmosDB emulator secret key is public/documented — env-var is acceptable for local dev
+    - "env-var-secret"

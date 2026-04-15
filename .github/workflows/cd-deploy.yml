@@ -1,0 +1,64 @@
+name: CD — Deploy to Kubernetes
+
+# Manually triggered. Requires a KUBECONFIG secret (base64-encoded kubeconfig)
+# set on the target environment in repo Settings → Environments.
+#
+# For local OrbStack:
+#   kubectl config view --raw | base64 | pbcopy
+#   → add as KUBECONFIG secret on the "local" environment
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+      image_tag:
+        description: Docker image tag to deploy (default = latest commit SHA on main)
+        required: false
+        default: latest
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 --decode > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.image_tag }}"
+          if [ "$TAG" = "latest" ]; then
+            # Default: use the SHA of the latest push to main
+            TAG=$(git rev-parse --short HEAD)
+          fi
+          echo "value=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Patch image tags
+        run: |
+          TAG=${{ steps.tag.outputs.value }}
+          REPO=ghcr.io/${{ github.repository }}
+          sed -i "s|taskboard/backend:latest|${REPO}/backend:${TAG}|g"   k8s/backend.yaml
+          sed -i "s|taskboard/frontend:latest|${REPO}/frontend:${TAG}|g" k8s/frontend.yaml
+
+      - name: Apply manifests
+        run: kubectl apply -f k8s/
+
+      - name: Wait for rollouts
+        run: |
+          kubectl rollout status deployment/taskboard-backend  -n taskboard --timeout=300s
+          kubectl rollout status deployment/taskboard-frontend -n taskboard --timeout=300s

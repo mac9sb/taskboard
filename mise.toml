@@ -7,7 +7,7 @@ dotnet = "9"
 [tasks.install]
 description = "Install frontend npm dependencies"
 dir = "frontend"
-run = "npm install"
+run = "npm ci"
 
 # ── Local dev (in-memory, no infra) ───────────────────────────────────────────
 
@@ -187,3 +187,56 @@ mise run k8s:context
 kubectl delete -f k8s/ --ignore-not-found
 echo "✔ Torn down."
 """
+
+# ── Quality checks (lint / format / typecheck / test) ─────────────────────────
+
+[tasks.lint]
+description = "Lint frontend TypeScript with ESLint"
+dir = "frontend"
+run = "npm run lint"
+
+[tasks.typecheck]
+description = "Type-check frontend TypeScript (no emit)"
+dir = "frontend"
+run = "npm run typecheck"
+
+[tasks.format]
+description = "Auto-fix backend C# formatting"
+dir = "backend"
+run = "dotnet format"
+
+[tasks."format:check"]
+description = "Verify backend C# formatting is clean (CI gate — fails if changes needed)"
+dir = "backend"
+run = "dotnet format --verify-no-changes"
+
+[tasks."test:frontend"]
+description = "Run frontend Vitest tests"
+dir = "frontend"
+run = "npm test"
+
+[tasks."test:backend"]
+description = "Run backend xUnit integration tests"
+run = "dotnet test backend.Tests/TaskBoard.Api.Tests.csproj --configuration Release --verbosity normal"
+
+[tasks.test]
+description = "Run all tests (frontend + backend in parallel)"
+depends = ["test:frontend", "test:backend"]
+
+[tasks."check:k8s"]
+description = "Validate and lint Kubernetes manifests (requires kubeconform + kube-linter in PATH)"
+run = """
+#!/usr/bin/env bash
+set -e
+echo "▶ Schema validation (kubeconform)..."
+kubeconform -strict -summary -kubernetes-version 1.31.0 k8s/
+
+echo "▶ Best-practices lint (kube-linter)..."
+kube-linter lint --config .kube-linter.yaml k8s/
+
+echo "✔ K8s manifests OK."
+"""
+
+[tasks.check]
+description = "Run every CI check locally — lint, typecheck, format:check, all tests"
+depends = ["lint", "typecheck", "format:check", "test:frontend", "test:backend"]
