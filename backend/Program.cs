@@ -118,3 +118,6 @@ app.MapDelete("/api/projects/{projectId}/tasks/{id}", async (string projectId, s
 });
 
 app.Run();
+
+// Required for WebApplicationFactory<Program> in tests
+public partial class Program { }
