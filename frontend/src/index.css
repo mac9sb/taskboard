@@ -261,6 +261,30 @@ body {
   padding: 16px 0;
 }
 
+/* Drag and drop */
+.kanban-col {
+  transition: box-shadow 0.15s, background 0.15s;
+}
+
+.kanban-col.col--drag-over {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.kanban-col.col-todo.col--drag-over        { background: #c8d9fc; }
+.kanban-col.col-in-progress.col--drag-over { background: #ffe8a0; }
+.kanban-col.col-done.col--drag-over        { background: #b0e0bc; }
+
+@media (prefers-color-scheme: dark) {
+  .kanban-col.col-todo.col--drag-over        { background: #1e2d50; }
+  .kanban-col.col-in-progress.col--drag-over { background: #3a2d0d; }
+  .kanban-col.col-done.col--drag-over        { background: #0d3020; }
+}
+
+.col-empty--over {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* Task Card */
 .task-card {
   background: var(--surface);
@@ -271,7 +295,30 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  cursor: grab;
+  transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
 }
+
+.task-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.08);
+}
+
+.task-card:active { cursor: grabbing; }
+
+.task-card--dragging {
+  opacity: 0.35;
+  transform: scale(0.97);
+}
+
+.task-drag-hint {
+  font-size: 10px;
+  color: var(--text-2);
+  opacity: 0;
+  transition: opacity 0.15s;
+  user-select: none;
+}
+
+.task-card:hover .task-drag-hint { opacity: 1; }
 
 .task-card-header {
   display: flex;

@@ -48,9 +48,14 @@ export default function App() {
     setTasks((prev) => [...prev, task]);
   }
 
-  async function handleAdvance(task: TaskItem, next: TaskItem["status"]) {
-    const updated = await api.tasks.updateStatus(task.projectId, task.id, next);
-    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+  async function handleMoveTask(task: TaskItem, newStatus: TaskItem["status"]) {
+    setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, status: newStatus } : t));
+    try {
+      const updated = await api.tasks.updateStatus(task.projectId, task.id, newStatus);
+      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    } catch {
+      setTasks((prev) => prev.map((t) => t.id === task.id ? task : t));
+    }
   }
 
   async function handleDeleteTask(task: TaskItem) {
@@ -85,7 +90,7 @@ export default function App() {
             projectName={selectedProject.name}
             tasks={tasks}
             onCreateTask={handleCreateTask}
-            onAdvance={handleAdvance}
+            onMoveTask={handleMoveTask}
             onDelete={handleDeleteTask}
           />
         )}

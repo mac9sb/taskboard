@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import type { TaskItem } from "../api/client";
 import { TaskCard } from "./TaskCard";
 
@@ -12,14 +12,18 @@ interface Props {
   projectName: string;
   tasks: TaskItem[];
   onCreateTask: (title: string, description: string) => Promise<void>;
-  onAdvance: (task: TaskItem, next: TaskItem["status"]) => Promise<void>;
+  onMoveTask: (task: TaskItem, newStatus: TaskItem["status"]) => Promise<void>;
   onDelete: (task: TaskItem) => Promise<void>;
 }
 
-export function TaskBoard({ projectName, tasks, onCreateTask, onAdvance, onDelete }: Props) {
+export function TaskBoard({ projectName, tasks, onCreateTask, onMoveTask, onDelete }: Props) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [adding, setAdding] = useState(false);
+
+  const [draggingTask, setDraggingTask] = useState<TaskItem | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<TaskItem["status"] | null>(null);
+  const dragCounters = useRef<Record<string, number>>({});
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +33,40 @@ export function TaskBoard({ projectName, tasks, onCreateTask, onAdvance, onDelet
     setTitle("");
     setDescription("");
     setAdding(false);
+  }
+
+  function handleDragStart(task: TaskItem) {
+    setDraggingTask(task);
+  }
+
+  function handleDragEnd() {
+    setDraggingTask(null);
+    setDragOverCol(null);
+    dragCounters.current = {};
+  }
+
+  function handleDragEnter(colId: TaskItem["status"]) {
+    dragCounters.current[colId] = (dragCounters.current[colId] ?? 0) + 1;
+    setDragOverCol(colId);
+  }
+
+  function handleDragLeave(colId: TaskItem["status"]) {
+    dragCounters.current[colId] = (dragCounters.current[colId] ?? 1) - 1;
+    if (dragCounters.current[colId] <= 0) {
+      dragCounters.current[colId] = 0;
+      setDragOverCol((prev) => (prev === colId ? null : prev));
+    }
+  }
+
+  async function handleDrop(e: React.DragEvent, colId: TaskItem["status"]) {
+    e.preventDefault();
+    dragCounters.current[colId] = 0;
+    setDragOverCol(null);
+    const taskId = e.dataTransfer.getData("text/plain");
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task || task.status === colId) return;
+    setDraggingTask(null);
+    await onMoveTask(task, colId);
   }
 
   return (
@@ -58,8 +96,22 @@ export function TaskBoard({ projectName, tasks, onCreateTask, onAdvance, onDelet
       <div className="kanban">
         {COLUMNS.map((col) => {
           const colTasks = tasks.filter((t) => t.status === col.id);
+          const isOver = dragOverCol === col.id;
+          const isDragSource = draggingTask?.status === col.id;
+
           return (
-            <div key={col.id} className={`kanban-col col-${col.id}`}>
+            <div
+              key={col.id}
+              className={[
+                "kanban-col",
+                `col-${col.id}`,
+                isOver && !isDragSource ? "col--drag-over" : "",
+              ].filter(Boolean).join(" ")}
+              onDragOver={(e) => e.preventDefault()}
+              onDragEnter={() => handleDragEnter(col.id)}
+              onDragLeave={() => handleDragLeave(col.id)}
+              onDrop={(e) => handleDrop(e, col.id)}
+            >
               <div className="col-header">
                 <span className="col-title">{col.label}</span>
                 <span className="col-count">{colTasks.length}</span>
@@ -69,12 +121,16 @@ export function TaskBoard({ projectName, tasks, onCreateTask, onAdvance, onDelet
                   <TaskCard
                     key={task.id}
                     task={task}
-                    onAdvance={onAdvance}
+                    isDragging={draggingTask?.id === task.id}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
                     onDelete={onDelete}
                   />
                 ))}
                 {colTasks.length === 0 && (
-                  <p className="col-empty">No tasks</p>
+                  <p className={`col-empty${isOver && !isDragSource ? " col-empty--over" : ""}`}>
+                    {isOver && !isDragSource ? "Drop here" : "No tasks"}
+                  </p>
                 )}
               </div>
             </div>
