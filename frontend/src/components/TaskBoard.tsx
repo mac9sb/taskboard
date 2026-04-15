@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import type { TaskItem } from "../api/client";
 import { TaskCard } from "./TaskCard";
 
@@ -69,6 +69,15 @@ export function TaskBoard({ projectName, tasks, onCreateTask, onMoveTask, onDele
     await onMoveTask(task, colId);
   }
 
+  const tasksByStatus = useMemo(() => {
+    const map: Record<string, TaskItem[]> = {};
+    for (const col of COLUMNS) map[col.id] = [];
+    for (const t of tasks) {
+      if (map[t.status]) map[t.status].push(t);
+    }
+    return map;
+  }, [tasks]);
+
   return (
     <div className="board-container">
       <div className="board-header">
@@ -95,7 +104,7 @@ export function TaskBoard({ projectName, tasks, onCreateTask, onMoveTask, onDele
 
       <div className="kanban">
         {COLUMNS.map((col) => {
-          const colTasks = tasks.filter((t) => t.status === col.id);
+          const colTasks = tasksByStatus[col.id];
           const isOver = dragOverCol === col.id;
           const isDragSource = draggingTask?.status === col.id;
 

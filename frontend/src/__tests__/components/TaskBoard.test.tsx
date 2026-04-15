@@ -2,17 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TaskBoard } from "../../components/TaskBoard";
-import type { TaskItem } from "../../api/client";
-
-const makeTask = (overrides: Partial<TaskItem> = {}): TaskItem => ({
-  id: `task-${Math.random()}`,
-  projectId: "proj-1",
-  title: "A task",
-  description: "",
-  status: "todo",
-  createdAt: new Date().toISOString(),
-  ...overrides,
-});
+import { makeTask } from "../testUtils";
 
 const defaultProps = {
   projectName: "My Project",

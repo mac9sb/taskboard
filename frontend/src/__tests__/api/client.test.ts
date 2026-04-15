@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { api } from "../../api/client";
+import { makeProject, makeTask } from "../testUtils";
 
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
@@ -37,14 +38,14 @@ describe("api.projects", () => {
   });
 
   it("list() returns the parsed array", async () => {
-    const projects = [{ id: "1", name: "Alpha", description: "", createdAt: "" }];
+    const projects = [makeProject({ name: "Alpha" })];
     mockResponse(projects);
     const result = await api.projects.list();
     expect(result).toEqual(projects);
   });
 
   it("create() calls POST /api/projects with body", async () => {
-    mockResponse({ id: "1", name: "Alpha", description: "", createdAt: "" });
+    mockResponse(makeProject({ name: "Alpha" }));
     await api.projects.create({ name: "Alpha", description: "" });
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/projects",
@@ -78,8 +79,7 @@ describe("api.tasks", () => {
   });
 
   it("create() sends task payload", async () => {
-    const task = { id: "t1", projectId: "proj-1", title: "T", description: "", status: "todo" as const, createdAt: "" };
-    mockResponse(task, 201);
+    mockResponse(makeTask({ projectId: "proj-1", title: "T" }), 201);
     await api.tasks.create("proj-1", { title: "T", description: "" });
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/projects/proj-1/tasks",
@@ -88,8 +88,7 @@ describe("api.tasks", () => {
   });
 
   it("updateStatus() sends PATCH with status body", async () => {
-    const task = { id: "t1", projectId: "p1", title: "T", description: "", status: "done" as const, createdAt: "" };
-    mockResponse(task);
+    mockResponse(makeTask({ projectId: "p1", status: "done" }));
     await api.tasks.updateStatus("p1", "t1", "done");
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/projects/p1/tasks/t1",

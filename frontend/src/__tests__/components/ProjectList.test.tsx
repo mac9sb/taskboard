@@ -2,15 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectList } from "../../components/ProjectList";
-import type { Project } from "../../api/client";
-
-const makeProject = (overrides: Partial<Project> = {}): Project => ({
-  id: `proj-${Math.random()}`,
-  name: "Test Project",
-  description: "",
-  createdAt: new Date().toISOString(),
-  ...overrides,
-});
+import { makeProject } from "../testUtils";
 
 const defaultProps = {
   projects: [],

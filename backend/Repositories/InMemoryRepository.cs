@@ -6,7 +6,10 @@ namespace TaskBoard.Api.Repositories;
 public class InMemoryRepository : IRepository
 {
     private readonly ConcurrentDictionary<string, Project> _projects = new();
-    private readonly ConcurrentDictionary<string, TaskItem> _tasks = new();
+
+    // Secondary index: projectId → (taskId → task)
+    // Eliminates full-dictionary scans in GetTasksAsync and DeleteProjectAsync.
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, TaskItem>> _tasksByProject = new();
 
     public Task<List<Project>> GetProjectsAsync() =>
         Task.FromResult(_projects.Values.OrderByDescending(p => p.CreatedAt).ToList());
@@ -20,34 +23,38 @@ public class InMemoryRepository : IRepository
     public Task DeleteProjectAsync(string id)
     {
         _projects.TryRemove(id, out _);
-        foreach (var task in _tasks.Values.Where(t => t.ProjectId == id).ToList())
-            _tasks.TryRemove(task.Id, out _);
+        _tasksByProject.TryRemove(id, out _);
         return Task.CompletedTask;
     }
 
-    public Task<List<TaskItem>> GetTasksAsync(string projectId) =>
-        Task.FromResult(_tasks.Values
-            .Where(t => t.ProjectId == projectId)
-            .OrderBy(t => t.CreatedAt)
-            .ToList());
+    public Task<List<TaskItem>> GetTasksAsync(string projectId)
+    {
+        if (!_tasksByProject.TryGetValue(projectId, out var bucket))
+            return Task.FromResult(new List<TaskItem>());
+
+        return Task.FromResult(bucket.Values.OrderBy(t => t.CreatedAt).ToList());
+    }
 
     public Task<TaskItem> CreateTaskAsync(TaskItem task)
     {
-        _tasks[task.Id] = task;
+        var bucket = _tasksByProject.GetOrAdd(task.ProjectId, _ => new ConcurrentDictionary<string, TaskItem>());
+        bucket[task.Id] = task;
         return Task.FromResult(task);
     }
 
     public Task<TaskItem> UpdateTaskStatusAsync(string id, string projectId, string status)
     {
-        if (!_tasks.TryGetValue(id, out var task))
+        if (!_tasksByProject.TryGetValue(projectId, out var bucket) || !bucket.TryGetValue(id, out var task))
             throw new KeyNotFoundException($"Task {id} not found");
+
         task.Status = status;
         return Task.FromResult(task);
     }
 
     public Task DeleteTaskAsync(string id, string projectId)
     {
-        _tasks.TryRemove(id, out _);
+        if (_tasksByProject.TryGetValue(projectId, out var bucket))
+            bucket.TryRemove(id, out _);
         return Task.CompletedTask;
     }
 }

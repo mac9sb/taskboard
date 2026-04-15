@@ -104,7 +104,7 @@ app.MapPost("/api/projects/{projectId}/tasks", async (string projectId, TaskItem
     task.Id = Guid.NewGuid().ToString();
     task.ProjectId = projectId;
     task.CreatedAt = DateTime.UtcNow;
-    task.Status = string.IsNullOrEmpty(task.Status) ? "todo" : task.Status;
+    task.Status = string.IsNullOrEmpty(task.Status) ? TaskBoard.Api.Models.TaskStatus.Todo : task.Status;
     return Results.Created($"/api/projects/{projectId}/tasks/{task.Id}", await db.CreateTaskAsync(task));
 });
 

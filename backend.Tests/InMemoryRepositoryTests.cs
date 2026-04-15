@@ -2,6 +2,7 @@ using FluentAssertions;
 using TaskBoard.Api.Models;
 using TaskBoard.Api.Repositories;
 using Xunit;
+using TaskStatus = TaskBoard.Api.Models.TaskStatus;
 
 namespace TaskBoard.Api.Tests;
 
@@ -19,7 +20,7 @@ public class InMemoryRepositoryTests
         CreatedAt = DateTime.UtcNow
     };
 
-    private static TaskItem MakeTask(string projectId, string title = "Test Task", string status = "todo") => new()
+    private static TaskItem MakeTask(string projectId, string title = "Test Task", string status = TaskStatus.Todo) => new()
     {
         Id = Guid.NewGuid().ToString(),
         ProjectId = projectId,
@@ -189,20 +190,20 @@ public class InMemoryRepositoryTests
         var repo = CreateRepo();
         var project = MakeProject();
         await repo.CreateProjectAsync(project);
-        var task = MakeTask(project.Id, status: "todo");
+        var task = MakeTask(project.Id, status: TaskStatus.Todo);
         await repo.CreateTaskAsync(task);
 
-        var updated = await repo.UpdateTaskStatusAsync(task.Id, project.Id, "done");
+        var updated = await repo.UpdateTaskStatusAsync(task.Id, project.Id, TaskStatus.Done);
 
-        updated.Status.Should().Be("done");
-        (await repo.GetTasksAsync(project.Id)).Single(t => t.Id == task.Id).Status.Should().Be("done");
+        updated.Status.Should().Be(TaskStatus.Done);
+        (await repo.GetTasksAsync(project.Id)).Single(t => t.Id == task.Id).Status.Should().Be(TaskStatus.Done);
     }
 
     [Fact]
     public async Task UpdateTaskStatusAsync_UnknownId_ThrowsKeyNotFoundException()
     {
         var repo = CreateRepo();
-        var act = async () => await repo.UpdateTaskStatusAsync("ghost-id", "any-project", "done");
+        var act = async () => await repo.UpdateTaskStatusAsync("ghost-id", "any-project", TaskStatus.Done);
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
