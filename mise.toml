@@ -1,0 +1,189 @@
+[tools]
+node = "22"
+dotnet = "9"
+
+# ── Install ────────────────────────────────────────────────────────────────────
+
+[tasks.install]
+description = "Install frontend npm dependencies"
+dir = "frontend"
+run = "npm install"
+
+# ── Local dev (in-memory, no infra) ───────────────────────────────────────────
+
+[tasks.backend]
+description = "Start backend locally (in-memory store)"
+dir = "backend"
+run = "dotnet run"
+
+[tasks.frontend]
+description = "Start frontend dev server locally"
+dir = "frontend"
+run = "npm run dev"
+
+[tasks.dev]
+description = "Start backend + frontend locally using in-memory store"
+run = """
+#!/usr/bin/env bash
+
+BACKEND_PID=""
+FRONTEND_PID=""
+
+cleanup() {
+  echo ""
+  echo "◼ Shutting down..."
+  [ -n "$BACKEND_PID" ]  && kill "$BACKEND_PID"  2>/dev/null || true
+  [ -n "$FRONTEND_PID" ] && kill "$FRONTEND_PID" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+(cd backend && dotnet run) &
+BACKEND_PID=$!
+
+(cd frontend && npm run dev) &
+FRONTEND_PID=$!
+
+echo ""
+echo "  Backend  → http://localhost:5000"
+echo "  Frontend → http://localhost:5173"
+echo ""
+echo "Press Ctrl+C to stop."
+wait
+"""
+
+# ── Kubernetes (OrbStack) — primary platform ───────────────────────────────────
+
+[tasks."k8s:context"]
+description = "Switch to the OrbStack kubectl context (enable Kubernetes in OrbStack first)"
+run = """
+#!/usr/bin/env bash
+CTX=$(kubectl config get-contexts -o name 2>/dev/null | grep -i orb | head -1)
+if [ -z "$CTX" ]; then
+  echo "✗ No OrbStack Kubernetes context found."
+  echo "  → Open OrbStack → Settings → Kubernetes → Enable"
+  exit 1
+fi
+kubectl config use-context "$CTX"
+echo "✔ Using context: $CTX"
+"""
+
+[tasks."k8s:build"]
+description = "Build backend and frontend Docker images"
+run = """
+#!/usr/bin/env bash
+set -e
+echo "▶ Building backend..."
+docker build -t taskboard/backend:latest backend/
+
+echo "▶ Building frontend..."
+docker build -t taskboard/frontend:latest frontend/
+
+echo "✔ Images built."
+"""
+
+[tasks."k8s:deploy"]
+description = "Full deploy to OrbStack Kubernetes (Cosmos DB + backend + frontend)"
+run = """
+#!/usr/bin/env bash
+set -e
+
+mise run k8s:context
+mise run k8s:build
+
+echo "▶ Applying manifests..."
+kubectl apply -f k8s/namespace.yaml
+kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/taskboard --timeout=30s
+kubectl apply -f k8s/
+
+echo ""
+echo "▶ Waiting for Cosmos DB to be ready (this can take a while on first pull)..."
+kubectl rollout status deployment/cosmosdb -n taskboard --timeout=360s
+
+echo "▶ Waiting for backend to be ready..."
+kubectl rollout status deployment/taskboard-backend -n taskboard --timeout=120s
+
+echo "▶ Waiting for frontend to be ready..."
+kubectl rollout status deployment/taskboard-frontend -n taskboard --timeout=60s
+
+echo ""
+echo "✔ Deployed. Run: mise run k8s:open"
+"""
+
+[tasks."k8s:open"]
+description = "Port-forward frontend to http://localhost:8080 (no rebuild — use k8s:up to rebuild first)"
+run = """
+#!/usr/bin/env bash
+set -e
+mise run k8s:context
+
+if ! kubectl get namespace taskboard &>/dev/null; then
+  echo "▶ Namespace not found — running k8s:deploy first..."
+  mise run k8s:deploy
+fi
+
+echo "  App → http://localhost:8080"
+kubectl port-forward -n taskboard svc/taskboard-frontend 8080:80
+"""
+
+[tasks."k8s:up"]
+description = "Rebuild images, force-restart pods, then port-forward to http://localhost:8080"
+run = """
+#!/usr/bin/env bash
+set -e
+mise run k8s:context
+mise run k8s:build
+
+echo "▶ Applying manifests..."
+kubectl apply -f k8s/namespace.yaml
+kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/taskboard --timeout=30s
+kubectl apply -f k8s/
+
+echo "▶ Waiting for Cosmos DB..."
+kubectl rollout status deployment/cosmosdb -n taskboard --timeout=360s
+
+echo "▶ Force-restarting backend and frontend with new images..."
+kubectl rollout restart deployment/taskboard-backend deployment/taskboard-frontend -n taskboard
+
+echo "▶ Waiting for backend..."
+kubectl rollout status deployment/taskboard-backend -n taskboard --timeout=120s
+
+echo "▶ Waiting for frontend..."
+kubectl rollout status deployment/taskboard-frontend -n taskboard --timeout=60s
+
+echo ""
+echo "  App → http://localhost:8080"
+kubectl port-forward -n taskboard svc/taskboard-frontend 8080:80
+"""
+
+[tasks."k8s:status"]
+description = "Show pods, services, and deployments in the taskboard namespace"
+run = """
+#!/usr/bin/env bash
+mise run k8s:context
+kubectl get deployments,pods,services -n taskboard
+"""
+
+[tasks."k8s:logs"]
+description = "Follow backend pod logs"
+run = """
+#!/usr/bin/env bash
+mise run k8s:context
+kubectl logs -n taskboard -l app=taskboard-backend -f --max-log-requests=3
+"""
+
+[tasks."k8s:restart"]
+description = "Rolling restart of backend and frontend deployments"
+run = """
+#!/usr/bin/env bash
+mise run k8s:context
+kubectl rollout restart deployment/taskboard-backend deployment/taskboard-frontend -n taskboard
+"""
+
+[tasks."k8s:teardown"]
+description = "Remove all TaskBoard resources from OrbStack Kubernetes"
+run = """
+#!/usr/bin/env bash
+mise run k8s:context
+kubectl delete -f k8s/ --ignore-not-found
+echo "✔ Torn down."
+"""
