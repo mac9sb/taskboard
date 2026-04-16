@@ -1,64 +1,72 @@
-name: CD — Deploy to Kubernetes
+name: CD — Deploy to Azure Container Apps
 
-# Manually triggered. Requires a KUBECONFIG secret (base64-encoded kubeconfig)
-# set on the target environment in repo Settings → Environments.
-#
-# For local OrbStack:
-#   kubectl config view --raw | base64 | pbcopy
-#   → add as KUBECONFIG secret on the "local" environment
+# Triggered manually or by cd-docker.yml once new images are pushed.
+# Requires two secrets set on the target GitHub environment:
+#   AZURE_CREDENTIALS — output of: mise run infra:setup:gh-secret
+#   GHCR_TOKEN        — GitHub PAT with read:packages scope
 on:
   workflow_dispatch:
     inputs:
       environment:
         description: Target environment
         required: true
-        default: staging
+        default: production
         type: choice
-        options: [staging, production]
+        options: [production, staging]
       image_tag:
-        description: Docker image tag to deploy (default = latest commit SHA on main)
+        description: Image tag to deploy (defaults to the triggering commit SHA)
         required: false
         default: latest
 
 jobs:
   deploy:
-    name: Deploy to ${{ github.event.inputs.environment }}
+    name: Deploy ${{ github.event.inputs.image_tag }} → ${{ github.event.inputs.environment }}
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
+
+    env:
+      AZURE_RESOURCE_GROUP: taskboard-rg
+      IMAGE_REPO: ghcr.io/${{ github.repository }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
+      - uses: jdx/mise-action@v2
 
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 --decode > ~/.kube/config
-          chmod 600 ~/.kube/config
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Resolve image tag
         id: tag
         run: |
           TAG="${{ github.event.inputs.image_tag }}"
-          if [ "$TAG" = "latest" ]; then
-            # Default: use the SHA of the latest push to main
-            TAG=$(git rev-parse --short HEAD)
-          fi
+          [ "$TAG" = "latest" ] && TAG="${{ github.sha }}"
           echo "value=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Patch image tags
+      - name: Update backend image
         run: |
-          TAG=${{ steps.tag.outputs.value }}
-          REPO=ghcr.io/${{ github.repository }}
-          sed -i "s|taskboard/backend:latest|${REPO}/backend:${TAG}|g"   k8s/backend.yaml
-          sed -i "s|taskboard/frontend:latest|${REPO}/frontend:${TAG}|g" k8s/frontend.yaml
+          az containerapp update \
+            --name taskboard-backend \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "$IMAGE_REPO/backend:${{ steps.tag.outputs.value }}" \
+            --output none
 
-      - name: Apply manifests
-        run: kubectl apply -f k8s/
-
-      - name: Wait for rollouts
+      - name: Update frontend image
         run: |
-          kubectl rollout status deployment/taskboard-backend  -n taskboard --timeout=300s
-          kubectl rollout status deployment/taskboard-frontend -n taskboard --timeout=300s
+          az containerapp update \
+            --name taskboard-frontend \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "$IMAGE_REPO/frontend:${{ steps.tag.outputs.value }}" \
+            --output none
+
+      - name: Show live URL
+        run: |
+          URL=$(az containerapp show \
+            --name taskboard-frontend \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query 'properties.configuration.ingress.fqdn' \
+            --output tsv)
+          echo "### Deployed to https://$URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image tag:** ${{ steps.tag.outputs.value }}" >> "$GITHUB_STEP_SUMMARY"

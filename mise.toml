@@ -1,15 +1,15 @@
 [tools]
 node = "22"
 dotnet = "9"
+azure-cli = "latest"
+uv = "latest"
+kubeconform = "latest"
+kube-linter = "latest"
 
-# ── Install ────────────────────────────────────────────────────────────────────
+[hooks]
+postinstall = "npm --prefix frontend ci"
 
-[tasks.install]
-description = "Install frontend npm dependencies"
-dir = "frontend"
-run = "npm ci"
-
-# ── Local dev (in-memory, no infra) ───────────────────────────────────────────
+# ─── Local dev ───
 
 [tasks.backend]
 description = "Start backend locally (in-memory store)"
@@ -51,20 +51,18 @@ echo "Press Ctrl+C to stop."
 wait
 """
 
-# ── Kubernetes (OrbStack) — primary platform ───────────────────────────────────
+# ─── Kubernetes ───
 
 [tasks."k8s:context"]
-description = "Switch to the OrbStack kubectl context (enable Kubernetes in OrbStack first)"
+description = "Verify kubectl is configured and print the active context"
 run = """
 #!/usr/bin/env bash
-CTX=$(kubectl config get-contexts -o name 2>/dev/null | grep -i orb | head -1)
-if [ -z "$CTX" ]; then
-  echo "✗ No OrbStack Kubernetes context found."
-  echo "  → Open OrbStack → Settings → Kubernetes → Enable"
+if ! kubectl config current-context &>/dev/null; then
+  echo "✗ No active kubectl context found."
+  echo "  → Configure your kubeconfig and try again."
   exit 1
 fi
-kubectl config use-context "$CTX"
-echo "✔ Using context: $CTX"
+echo "✔ Context: $(kubectl config current-context)"
 """
 
 [tasks."k8s:build"]
@@ -82,7 +80,7 @@ echo "✔ Images built."
 """
 
 [tasks."k8s:deploy"]
-description = "Full deploy to OrbStack Kubernetes (Cosmos DB + backend + frontend)"
+description = "Full deploy to Kubernetes (Cosmos DB + backend + frontend)"
 run = """
 #!/usr/bin/env bash
 set -e
@@ -180,7 +178,7 @@ kubectl rollout restart deployment/taskboard-backend deployment/taskboard-fronte
 """
 
 [tasks."k8s:teardown"]
-description = "Remove all TaskBoard resources from OrbStack Kubernetes"
+description = "Remove all TaskBoard resources from the cluster"
 run = """
 #!/usr/bin/env bash
 mise run k8s:context
@@ -188,7 +186,7 @@ kubectl delete -f k8s/ --ignore-not-found
 echo "✔ Torn down."
 """
 
-# ── Quality checks (lint / format / typecheck / test) ─────────────────────────
+# ─── CI checks ───
 
 [tasks.lint]
 description = "Lint frontend TypeScript with ESLint"
@@ -224,19 +222,118 @@ description = "Run all tests (frontend + backend in parallel)"
 depends = ["test:frontend", "test:backend"]
 
 [tasks."check:k8s"]
-description = "Validate and lint Kubernetes manifests (requires kubeconform + kube-linter in PATH)"
+description = "Validate and lint Kubernetes manifests"
 run = """
 #!/usr/bin/env bash
 set -e
-echo "▶ Schema validation (kubeconform)..."
 kubeconform -strict -summary -kubernetes-version 1.31.0 k8s/
-
-echo "▶ Best-practices lint (kube-linter)..."
 kube-linter lint --config .kube-linter.yaml k8s/
-
 echo "✔ K8s manifests OK."
 """
 
-[tasks.check]
-description = "Run every CI check locally — lint, typecheck, format:check, all tests"
-depends = ["lint", "typecheck", "format:check", "test:frontend", "test:backend"]
+[tasks.ci]
+description = "Run all CI checks — matches the GitHub Actions pipeline exactly"
+depends = ["lint", "typecheck", "format:check", "test:frontend", "test:backend", "check:k8s"]
+
+# ─── Azure infra ───
+# Copy .env.example → .env and fill in values before running these tasks.
+
+[tasks."infra:up"]
+description = "Provision Azure infra (Container Apps + Cosmos DB) — idempotent, safe to re-run"
+run = """
+#!/usr/bin/env bash
+set -e
+RG=${AZURE_RESOURCE_GROUP:-taskboard-rg}
+LOCATION=${AZURE_LOCATION:-eastus}
+
+echo "▶ Installing Bicep..."
+az bicep install --only-show-errors
+
+echo "▶ Ensuring resource group '$RG' in $LOCATION..."
+az group create --name "$RG" --location "$LOCATION" --output none
+
+echo "▶ Deploying Bicep template (this takes ~3 min on first run)..."
+OUTPUTS=$(az deployment group create \
+  --resource-group "$RG" \
+  --name taskboard \
+  --template-file infra/main.bicep \
+  --parameters location="$LOCATION" ghcrToken="$GHCR_TOKEN" \
+  --query 'properties.outputs' \
+  --output json)
+
+FRONTEND_URL=$(echo "$OUTPUTS" | python3 -c "import sys,json; print(json.load(sys.stdin)['frontendUrl']['value'])")
+echo ""
+echo "✔ Deployed!"
+echo "  → $FRONTEND_URL"
+"""
+
+[tasks."infra:deploy"]
+description = "Fast deploy: update Container Apps to a new image tag (IMAGE_TAG=<sha>)"
+run = """
+#!/usr/bin/env bash
+set -e
+RG=${AZURE_RESOURCE_GROUP:-taskboard-rg}
+TAG=${IMAGE_TAG:-latest}
+REPO=ghcr.io/mac9sb/taskboard
+
+echo "▶ Deploying $TAG to backend..."
+az containerapp update --name taskboard-backend --resource-group "$RG" \
+  --image "$REPO/backend:$TAG" --output none
+
+echo "▶ Deploying $TAG to frontend..."
+az containerapp update --name taskboard-frontend --resource-group "$RG" \
+  --image "$REPO/frontend:$TAG" --output none
+
+echo "✔ Deployed $TAG."
+"""
+
+[tasks."infra:status"]
+description = "Show live Container App URLs and replica counts"
+run = """
+#!/usr/bin/env bash
+RG=${AZURE_RESOURCE_GROUP:-taskboard-rg}
+echo "=== Container Apps ==="
+az containerapp list --resource-group "$RG" \
+  --query '[].{Name:name,URL:properties.configuration.ingress.fqdn,Min:properties.template.scale.minReplicas,Max:properties.template.scale.maxReplicas}' \
+  --output table
+echo ""
+echo "=== Cosmos DB ==="
+az cosmosdb list --resource-group "$RG" \
+  --query '[].{Name:name,Location:location,Serverless:properties.capabilities[0].name}' \
+  --output table
+"""
+
+[tasks."infra:logs:backend"]
+description = "Stream backend Container App logs"
+run = """
+#!/usr/bin/env bash
+az containerapp logs show \
+  --name taskboard-backend \
+  --resource-group "${AZURE_RESOURCE_GROUP:-taskboard-rg}" \
+  --follow --tail 50
+"""
+
+[tasks."infra:logs:frontend"]
+description = "Stream frontend Container App logs"
+run = """
+#!/usr/bin/env bash
+az containerapp logs show \
+  --name taskboard-frontend \
+  --resource-group "${AZURE_RESOURCE_GROUP:-taskboard-rg}" \
+  --follow --tail 50
+"""
+
+[tasks."infra:down"]
+description = "Delete all Azure resources — ⚠ destructive and irreversible"
+run = """
+#!/usr/bin/env bash
+RG=${AZURE_RESOURCE_GROUP:-taskboard-rg}
+echo "⚠  This will permanently delete resource group '$RG' and everything in it."
+read -p "Type the resource group name to confirm: " CONFIRM
+if [[ "$CONFIRM" == "$RG" ]]; then
+  az group delete --name "$RG" --yes --no-wait
+  echo "✔ Deletion initiated."
+else
+  echo "Cancelled."
+fi
+"""
