@@ -20,6 +20,16 @@ public class InMemoryRepository : IRepository
         return Task.FromResult(project);
     }
 
+    public Task<Project> UpdateProjectAsync(string id, string name, string description)
+    {
+        if (!_projects.TryGetValue(id, out var project))
+            throw new KeyNotFoundException($"Project {id} not found");
+
+        project.Name = name;
+        project.Description = description;
+        return Task.FromResult(project);
+    }
+
     public Task DeleteProjectAsync(string id)
     {
         _projects.TryRemove(id, out _);

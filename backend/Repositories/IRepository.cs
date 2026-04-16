@@ -6,6 +6,7 @@ public interface IRepository
 {
     Task<List<Project>> GetProjectsAsync();
     Task<Project> CreateProjectAsync(Project project);
+    Task<Project> UpdateProjectAsync(string id, string name, string description);
     Task DeleteProjectAsync(string id);
 
     Task<List<TaskItem>> GetTasksAsync(string projectId);

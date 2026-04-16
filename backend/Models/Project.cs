@@ -16,3 +16,7 @@ public class Project
     [JsonPropertyName("createdAt")]
     public DateTime CreatedAt { get; set; }
 }
+
+public record ProjectUpdate(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("description")] string Description);

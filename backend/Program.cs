@@ -89,6 +89,9 @@ app.MapPost("/api/projects", async (Project project, IRepository db) =>
     return Results.Created($"/api/projects/{project.Id}", await db.CreateProjectAsync(project));
 });
 
+app.MapPatch("/api/projects/{id}", async (string id, ProjectUpdate update, IRepository db) =>
+    Results.Ok(await db.UpdateProjectAsync(id, update.Name, update.Description)));
+
 app.MapDelete("/api/projects/{id}", async (string id, IRepository db) =>
 {
     await db.DeleteProjectAsync(id);

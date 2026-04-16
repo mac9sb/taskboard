@@ -38,6 +38,16 @@ public class CosmosRepository : IRepository
         return response.Resource;
     }
 
+    public async Task<Project> UpdateProjectAsync(string id, string name, string description)
+    {
+        var response = await _projects.ReadItemAsync<Project>(id, new PartitionKey(id));
+        var project = response.Resource;
+        project.Name = name;
+        project.Description = description;
+        var updated = await _projects.ReplaceItemAsync(project, id, new PartitionKey(id));
+        return updated.Resource;
+    }
+
     public async Task DeleteProjectAsync(string id)
     {
         await _projects.DeleteItemAsync<Project>(id, new PartitionKey(id));
